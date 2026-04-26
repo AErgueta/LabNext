@@ -12,6 +12,8 @@ from models.convenio import Convenio
 from models.usuario import Usuario # <-- 1. IMPORTAMOS EL USUARIO
 from models.paciente import Paciente
 from models.sede import Sede
+from models.flujo_muestra import FlujoMuestra
+from models.muestra import Muestra
 
 load_dotenv()
 
@@ -26,6 +28,6 @@ async def conectar_bd():
     # 2. LOS AGREGAMOS A LA LISTA
     await init_beanie(
         database=client.LabNext, 
-        document_models=[Estudio, Orden, Medico, Convenio, Usuario, Paciente, Sede]
+        document_models=[Estudio, Orden, Medico, Convenio, Usuario, Paciente, Sede, FlujoMuestra, Muestra]
     )
     print("🚀 Base de datos conectada de forma segura")

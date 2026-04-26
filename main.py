@@ -10,6 +10,8 @@ from routes.caja import router as rutas_caja
 from routes.auth import router as rutas_auth
 from routes.pacientes import router as rutas_pacientes
 from routes.sedes import router as rutas_sedes
+from routes.flujos import router as rutas_flujos
+from routes.muestras import router as rutas_muestras
 
 app = FastAPI(title="LabNext API")
 
@@ -25,6 +27,8 @@ app.include_router(rutas_caja, tags=["Caja y Facturación"])
 app.include_router(rutas_auth, tags=["Seguridad"])
 app.include_router(rutas_pacientes, tags=["Pacientes"])
 app.include_router(rutas_sedes, prefix="/sedes", tags=["Sedes"])
+app.include_router(rutas_flujos, prefix="/flujos", tags=["Configuración - Flujos de Muestras"])
+app.include_router(rutas_muestras, prefix="/muestras", tags=["Logística y Tracking"])
 # (Aquí eliminamos la línea duplicada de órdenes que tenías)
 
 if __name__ == "__main__":
