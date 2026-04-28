@@ -1,21 +1,26 @@
 # Archivo: routes/ordenes.py
 from fastapi import APIRouter, HTTPException, Depends
-from models.orden import Orden
+from pydantic import BaseModel
+from typing import List, Optional
+from beanie import PydanticObjectId
+import random
+from models.orden import Orden, PacienteInfo
+from services.generador_muestras import generar_tubos_para_orden
 from models.estudio import Estudio
 from services.evaluador import interpretar_resultado # Importamos nuestra Función Global
 from utils.seguridad import verificar_token
 
 router = APIRouter()
 
-@router.post("/ordenes")
-async def crear_orden(orden: Orden, usuario: dict = Depends(verificar_token)):
-    # Al hacer .insert(), Beanie dispara el @before_event automáticamente
-    await orden.insert()
-    return {
-        "status": "success",
-        "numero_orden": orden.numero_orden,
-        "total_calculado": orden.total_pagado # Veremos si el trigger funcionó
-    }
+# @router.post("/ordenes")
+# async def crear_orden(orden: Orden, usuario: dict = Depends(verificar_token)):
+#     # Al hacer .insert(), Beanie dispara el @before_event automáticamente
+#     await orden.insert()
+#     return {
+#         "status": "success",
+#         "numero_orden": orden.numero_orden,
+#         "total_calculado": orden.total_pagado # Veremos si el trigger funcionó
+#     }
 
 @router.get("/ordenes/")
 async def listar_ordenes():
@@ -55,3 +60,62 @@ async def registrar_resultado(numero_orden: str, clave_analito: str, valor: floa
             }
 
     raise HTTPException(status_code=404, detail="Analito no encontrado")
+
+# 1. EL MOLDE DE ENTRADA (Lo que le pedimos al Frontend)
+class OrdenCreate(BaseModel):
+    sede_id: PydanticObjectId
+    paciente: PacienteInfo
+    estudios_solicitados: List[str]
+    medico_solicitante: str
+    convenio: Optional[str] = None
+    descuento_manual: float = 0.0
+
+@router.post("/ordenes", response_model=dict)
+async def crear_nueva_orden(
+    datos: OrdenCreate,
+    usuario_actual: dict = Depends(verificar_token)
+):
+    # 1. Validar que la orden tenga al menos un estudio
+    if not datos.estudios_solicitados:
+        raise HTTPException(status_code=400, detail="La orden debe tener al menos un estudio solicitado.")
+
+    # 2. Generar el número de orden (Simulado temporalmente)
+    # En producción esto será un correlativo real (Ej: ORD-26042026-001)
+    nro_orden_generado = f"ORD-{random.randint(10000, 99999)}"
+
+    # 3. Ensamblar la Orden con los datos del frontend
+    nueva_orden = Orden(
+        numero_orden=nro_orden_generado,
+        sede_id=datos.sede_id,
+        paciente=datos.paciente,
+        estudios_solicitados=datos.estudios_solicitados,
+        medico_solicitante=datos.medico_solicitante,
+        convenio=datos.convenio,
+        descuento_manual=datos.descuento_manual
+    )
+
+    # 4. GUARDAR EN BD (¡Aquí se detona tu @before_event automáticamente!)
+    # Se calculará el total_pagado y la fecha_entrega_estimada
+    await nueva_orden.insert()
+
+    # 5. EL DISPARO LOGÍSTICO: Generar los tubos físicos
+    try:
+        tubos_generados = await generar_tubos_para_orden(nueva_orden, usuario_actual["username"])
+    except Exception as e:
+        # Si algo falla al generar los tubos, avisamos pero no borramos la orden
+        raise HTTPException(status_code=500, detail=f"Orden creada, pero falló la logística: {str(e)}")
+
+   # 6. Devolvemos un resumen completo al frontend
+    return {
+        "mensaje": "Orden y logística generadas con éxito",
+        "orden": nueva_orden,
+        "cantidad_tubos": len(tubos_generados),
+        "tubos": [
+            {
+                "codigo": tubo.codigo_barras, 
+                "tipo": tubo.tipo_muestra, 
+                # Buscamos la observación dentro del primer evento del historial
+                "seccion": tubo.historial_tracking[0].observaciones if tubo.historial_tracking else "Sin sección"
+            } for tubo in tubos_generados
+        ]
+    }
