@@ -9,6 +9,8 @@ from services.generador_muestras import generar_tubos_para_orden
 from models.estudio import Estudio
 from services.evaluador import interpretar_resultado # Importamos nuestra Función Global
 from utils.seguridad import verificar_token
+from models.muestra import Muestra
+from models.resultado import ResultadoMuestra
 
 router = APIRouter()
 
@@ -117,5 +119,47 @@ async def crear_nueva_orden(
                 # Buscamos la observación dentro del primer evento del historial
                 "seccion": tubo.historial_tracking[0].observaciones if tubo.historial_tracking else "Sin sección"
             } for tubo in tubos_generados
+        ]
+    }
+
+
+@router.get("/{id}/expediente", response_model=dict)
+async def obtener_expediente_completo(id: PydanticObjectId):
+    # 1. Buscar la Orden
+    orden = await Orden.get(id)
+    if not orden:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+    # 2. Buscar todos los tubos (Muestras) asociados a esta orden
+    muestras = await Muestra.find(Muestra.orden_id == id).to_list()
+
+    # 3. Buscar todos los resultados clínicos validados para esta orden
+    resultados = await ResultadoMuestra.find(ResultadoMuestra.orden_id == id).to_list()
+
+    # 4. Consolidar la respuesta final
+    return {
+        "paciente": orden.paciente,
+        "detalles_orden": {
+            "numero": orden.numero_orden,
+            "fecha_creacion": orden.fecha_ingreso,
+            "fecha_entrega": orden.fecha_entrega_estimada,
+            "estado_pago": "Pagado" if orden.total_pagado > 0 else "Pendiente",
+            "sede_id": str(orden.sede_id)
+        },
+        "logistica_muestras": [
+            {
+                "codigo": m.codigo_barras,
+                "tipo": m.tipo_muestra,
+                "estado_actual": m.estado_actual,
+                "ultima_actualizacion": m.historial_tracking[-1].fecha_hora if m.historial_tracking else None
+            } for m in muestras
+        ],
+        "reporte_clinico": [
+            {
+                "estudio": r.estudio_nombre,
+                "fecha_validacion": r.fecha_procesamiento,
+                "validado_por": r.bioquimico_validador,
+                "analitos": r.resultados
+            } for r in resultados
         ]
     }
