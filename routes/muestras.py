@@ -134,3 +134,36 @@ async def listar_muestras(
     muestras = await Muestra.find(filtros).to_list()
     
     return muestras
+
+
+@router.get("/monitor-trabajo", response_model=dict)
+async def obtener_monitor_trabajo(usuario_actual: dict = Depends(verificar_token)):
+    # 1. Filtro de Seguridad: Solo personal autorizado
+    if usuario_actual["rol"] not in ["Admin", "Bioquimico"]:
+        raise HTTPException(
+            status_code=403, 
+            detail="Acceso denegado. Solo el personal clínico puede ver el monitor de trabajo."
+        )
+
+    # 2. Buscar todos los tubos que aún NO están terminados
+    tubos_pendientes = await Muestra.find(
+        Muestra.estado_actual != "Procesada"
+    ).to_list()
+
+    # 3. Formatear la lista para la vista del monitor
+    vista_monitor = []
+    for tubo in tubos_pendientes:
+        vista_monitor.append({
+            "muestra_id": str(tubo.id),
+            "codigo_barras": tubo.codigo_barras,
+            "tipo_tubo": tubo.tipo_muestra,
+            #"estudios_solicitados": tubo.nombre_estudio,
+            "estado_actual": tubo.estado_actual,
+            "fecha_ingreso": tubo.historial_tracking[0].fecha_hora if tubo.historial_tracking else None
+        })
+
+    return {
+        "usuario_operador": usuario_actual["username"],
+        "total_tubos_pendientes": len(vista_monitor),
+        "lista_trabajo": vista_monitor
+    }

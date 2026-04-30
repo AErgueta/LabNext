@@ -1,25 +1,26 @@
 # Archivo: routes/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from models.usuario import Usuario
+# IMPORTANTE: Importamos nuestro RolUsuario estricto aquí
+from models.usuario import Usuario, RolUsuario 
 from utils.seguridad import encriptar_password, verificar_password, crear_token_acceso
 from pydantic import BaseModel, EmailStr
-from typing import Optional # Asegúrate de tener esta importación arriba
+from typing import Optional
 
 router = APIRouter()
 
-# --- 1. RUTA PARA CREAR USUARIOS (Normalmente solo el Admin haría esto) ---
+# --- 1. RUTA PARA CREAR USUARIOS ---
 class UsuarioRegistro(BaseModel):
     username: str
     nombre_completo: str
     email: EmailStr
     password: str
-    rol: str
+    rol: RolUsuario  # <-- AHORA ES ESTRICTO: Solo aceptará los roles oficiales
 
 class UsuarioUpdate(BaseModel):
     nombre_completo: Optional[str] = None
     email: Optional[EmailStr] = None
-    rol: Optional[str] = None
+    rol: Optional[RolUsuario] = None # <-- AHORA ES ESTRICTO
     activo: Optional[bool] = None
 
 @router.post("/usuarios/registrar")
@@ -89,3 +90,22 @@ async def actualizar_usuario(username: str, update_data: UsuarioUpdate):
         "estado_actual": "Activo" if user.activo else "Inactivo",
         "rol_actual": user.rol
     }
+
+class PasswordUpdate(BaseModel):
+    password_nueva: str
+
+@router.put("/usuarios/{username}/password")
+async def cambiar_password(username: str, data: PasswordUpdate):
+    # 1. Buscamos al usuario
+    user = await Usuario.find_one(Usuario.username == username)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    # 2. Encriptamos la NUEVA contraseña y la asignamos
+    user.password_hash = encriptar_password(data.password_nueva)
+    
+    # 3. Guardamos los cambios en MongoDB
+    await user.save()
+    
+    return {"status": "success", "message": "Contraseña actualizada de forma segura"}
