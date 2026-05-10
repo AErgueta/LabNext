@@ -1,5 +1,8 @@
 # Archivo: routes/ordenes.py
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import Response
+from weasyprint import HTML
+from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 from typing import List, Optional
 from beanie import PydanticObjectId
@@ -219,3 +222,43 @@ async def generar_tubos_para_orden(
             "paciente": orden.paciente.nombre_completo,
             "tubos": tubos_generados
         }
+
+# Configuración de Jinja2 para cargar tu HTML
+env = Environment(loader=FileSystemLoader("templates"))
+
+@router.get("/{orden_id}/reporte", tags=["Reportes"])
+async def generar_reporte_pdf(orden_id: str):
+    # 1. Convertir el string a ObjectId para Beanie
+    try:
+        orden_oid = PydanticObjectId(orden_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de orden inválido.")
+
+    # 2. Buscar la Orden
+    orden_db = await Orden.get(orden_oid)
+    if not orden_db:
+        raise HTTPException(status_code=404, detail="Orden no encontrada.")
+
+    # 3. Buscar todos los resultados validados para esta orden
+    # Asumiendo que tu modelo ResultadoMuestra tiene un campo orden_id
+    resultados_db = await ResultadoMuestra.find(ResultadoMuestra.orden_id == orden_oid).to_list()
+
+    if not resultados_db:
+        raise HTTPException(status_code=400, detail="Esta orden aún no tiene resultados procesados para imprimir.")
+
+    # 4. Cargar la plantilla HTML y pasarle los datos
+    template = env.get_template("reporte_paciente.html")
+    html_renderizado = template.render(
+        orden=orden_db,
+        resultados=resultados_db
+    )
+
+    # 5. Magia: Convertir HTML a PDF con WeasyPrint
+    pdf_bytes = HTML(string=html_renderizado).write_pdf()
+
+    # 6. Enviar el archivo binario al navegador
+    return Response(
+        content=pdf_bytes, 
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=Reporte_LabNext_{orden_db.numero_orden}.pdf"}
+    )

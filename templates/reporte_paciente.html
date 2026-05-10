@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Reporte de Laboratorio - {{ orden.paciente.nombre_completo }}</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            border-bottom: 2px solid #2c3e50;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            color: #2c3e50;
+            margin: 0;
+            font-size: 24px;
+        }
+        .info-paciente {
+            width: 100%;
+            margin-bottom: 30px;
+            border-collapse: collapse;
+        }
+        .info-paciente td {
+            padding: 5px;
+            font-size: 14px;
+        }
+        .tabla-resultados {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .tabla-resultados th {
+            background-color: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            text-align: left;
+            padding: 10px;
+            font-size: 14px;
+        }
+        .tabla-resultados td {
+            border-bottom: 1px solid #dee2e6;
+            padding: 10px;
+            font-size: 14px;
+        }
+        .fuera-rango {
+            color: #dc3545;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Laboratorio Central - Reporte Clínico</h1>
+        <p>Orden N°: {{ orden.numero_orden }} | Fecha: {{ orden.fecha_ingreso.strftime('%d/%m/%Y') }}</p>
+    </div>
+
+    <table class="info-paciente">
+        <tr>
+            <td><strong>Paciente:</strong> {{ orden.paciente.nombre_completo }}</td>
+            <td><strong>Edad:</strong> {{ orden.paciente.edad_anos }} años</td>
+            <td><strong>Sexo:</strong> {{ orden.paciente.sexo }}</td>
+        </tr>
+        <tr>
+            <td><strong>Médico Solicitante:</strong> {{ orden.medico_solicitante | default('Paciente Particular', true) }}</td>
+            <td><strong>Sede:</strong> Principal</td>
+            <td></td>
+        </tr>
+    </table>
+
+    {% for resultado in resultados %}
+    <h3 style="color: #2c3e50; margin-top: 30px; border-bottom: 1px solid #ccc; padding-bottom: 5px;">
+        Estudio: {{ resultado.estudio_nombre }}
+    </h3>
+    
+    <table class="tabla-resultados">
+        <thead>
+            <tr>
+                <th>Analito</th>
+                <th>Resultado</th>
+                <th>Unidades</th>
+                <th>Valores de Referencia</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for detalle in resultado.resultados %}
+            <tr>
+                <td>{{ detalle.analito }}</td>
+                <td class="{% if detalle.estado_clinico != 'Normal' %}fuera-rango{% endif %}">
+                    {{ detalle.valor_leido }} 
+                    {% if detalle.estado_clinico == 'Alto' %} &uarr; {% elif detalle.estado_clinico == 'Bajo' %} &darr; {% endif %}
+                </td>
+                <td>{{ detalle.unidad_medida }}</td>
+                <td>{{ detalle.rango_aplicado }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+
+    </table>
+    {% endfor %}
+
+    <div style="margin-top: 50px; text-align: center; font-size: 12px; color: #777;">
+        <p>Validado electrónicamente por: {{ resultados[0].bioquimico_validador }}</p>
+        <p>Este documento no constituye un diagnóstico médico final.</p>
+    </div>
+
+</body>
+</html>
