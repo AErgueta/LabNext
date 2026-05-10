@@ -58,7 +58,7 @@ def verificar_token(token: str = Depends(oauth2_scheme)):
 # --- NUEVO: EL GUARDIA DE ÉLITE (SOLO PARA ADMINISTRADORES) ---
 def verificar_admin(usuario_actual: dict = Depends(verificar_token)):
     # Este guardia revisa el paquete. Si el rol no es "admin", te saca a patadas.
-    if usuario_actual.get("rol") != "admin":
+    if usuario_actual.get("rol") != "Admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
             detail="Permisos insuficientes. Esta acción requiere rol de Administrador."

@@ -6,6 +6,8 @@ from datetime import datetime
 import random # Lo usaremos temporalmente para generar un código al azar
 
 from models.muestra import Muestra, EventoTracking
+from models.orden import Orden
+from models.resultado import ResultadoMuestra, ResultadoDetalle
 from models.flujo_muestra import FlujoMuestra
 # Asegúrate de que esta ruta coincida con donde tienes tu archivo de seguridad
 from utils.seguridad import verificar_token 
@@ -24,6 +26,19 @@ class AvanceMuestra(BaseModel):
     nuevo_estado: str
     sede_id: PydanticObjectId # En qué sede física le hicieron el escaneo
     observaciones: Optional[str] = None
+
+class DatoEntradaAnalito(BaseModel):
+    analito: str
+    valor_leido: float
+    unidad_medida: str
+    estado_clinico: str
+    rango_aplicado: str
+    fuera_de_rango: bool
+
+class RegistroResultados(BaseModel):
+    codigo_barras: str
+    estudio_nombre: str
+    resultados: List[DatoEntradaAnalito]
 
 @router.post("/", response_model=Muestra)
 async def registrar_nueva_muestra(
@@ -152,12 +167,24 @@ async def obtener_monitor_trabajo(usuario_actual: dict = Depends(verificar_token
 
     # 3. Formatear la lista para la vista del monitor
     vista_monitor = []
+    # ... código anterior (filtro de seguridad y búsqueda de tubos) ...
+
+    # Formatear la lista cruzando datos con la Orden
+    vista_monitor = []
     for tubo in tubos_pendientes:
+        
+        # PASO NUEVO: Usamos el orden_id del tubo para traer la Orden completa de la BD
+        orden_madre = await Orden.get(tubo.orden_id)
+        
+        # PASO NUEVO: Extraemos los estudios de la orden (si la orden existe)
+        # OJO: Aquí asumo que en tu models/orden.py el campo se llama "estudios"
+        lista_estudios = orden_madre.estudios_solicitados if orden_madre else []
+
         vista_monitor.append({
             "muestra_id": str(tubo.id),
             "codigo_barras": tubo.codigo_barras,
             "tipo_tubo": tubo.tipo_muestra,
-            #"estudios_solicitados": tubo.nombre_estudio,
+            "estudios_solicitados": lista_estudios, # ¡Le devolvemos los ojos al técnico!
             "estado_actual": tubo.estado_actual,
             "fecha_ingreso": tubo.historial_tracking[0].fecha_hora if tubo.historial_tracking else None
         })
@@ -166,4 +193,83 @@ async def obtener_monitor_trabajo(usuario_actual: dict = Depends(verificar_token
         "usuario_operador": usuario_actual["username"],
         "total_tubos_pendientes": len(vista_monitor),
         "lista_trabajo": vista_monitor
+    }
+
+@router.post("/resultados", response_model=dict)
+async def guardar_resultados(datos: RegistroResultados, usuario_actual: dict = Depends(verificar_token)):
+    # 1. Filtro de Seguridad
+    if usuario_actual["rol"] not in ["Admin", "Bioquimico"]:
+        raise HTTPException(status_code=403, detail="Acceso denegado. Solo personal clínico.")
+
+    # 2. Buscar la Muestra en Logística
+    tubo = await Muestra.find_one(Muestra.codigo_barras == datos.codigo_barras)
+    if not tubo:
+        raise HTTPException(status_code=404, detail="Muestra no encontrada")
+        
+    if tubo.estado_actual == "Procesada":
+        raise HTTPException(status_code=400, detail="Esta muestra ya fue procesada anteriormente")
+
+    # 3. Preparar la lista de analitos usando tu modelo ResultadoDetalle
+    detalles = []
+    for res in datos.resultados:
+        detalles.append(ResultadoDetalle(
+            analito=res.analito,
+            valor_leido=res.valor_leido,
+            unidad_medida=res.unidad_medida,
+            estado_clinico=res.estado_clinico,
+            rango_aplicado=res.rango_aplicado,
+            fuera_de_rango=res.fuera_de_rango
+        ))
+
+    # 4. Crear el documento en la colección resultados_clinicos
+    nuevo_resultado = ResultadoMuestra(
+        muestra_id=tubo.id,
+        orden_id=tubo.orden_id, # Usamos el vínculo directo desde el tubo
+        estudio_nombre=datos.estudio_nombre,
+        resultados=detalles,
+        bioquimico_validador=usuario_actual["username"] # Sello automático del bioquímico logueado
+    )
+    await nuevo_resultado.insert() # Aquí la magia: se guarda en su propia colección
+
+    # 5. Actualizar la logística de la Muestra
+    tubo.estado_actual = "Procesada"
+    sede_origen = tubo.historial_tracking[0].sede_id if tubo.historial_tracking else tubo.orden_id
+    
+    nuevo_evento = EventoTracking(
+        estado="Procesada",
+        usuario=usuario_actual["username"],
+        sede_id=sede_origen, 
+        observaciones=f"Resultados de {datos.estudio_nombre} validados"
+    )
+    tubo.historial_tracking.append(nuevo_evento)
+    await tubo.save()
+
+    return {
+        "status": "success",
+        "message": f"Resultados guardados correctamente. Muestra {tubo.codigo_barras} marcada como Procesada."
+    }
+
+@router.get("/resultados/orden/{orden_id}")
+async def obtener_resultados_orden(orden_id: PydanticObjectId, usuario_actual: dict = Depends(verificar_token)):
+    
+    # 1. Filtro de Seguridad: Usamos la variable para restringir quién puede ver resultados médicos
+    roles_permitidos = ["Admin", "Bioquimico", "Secretaria", "Medico"] # Ajusta estos roles según tu sistema
+    if usuario_actual["rol"] not in roles_permitidos:
+        raise HTTPException(status_code=403, detail="No tienes permisos para ver resultados médicos.")
+
+    # 2. Validar la existencia de la orden madre
+    orden = await Orden.get(orden_id)
+    if not orden:
+        raise HTTPException(status_code=404, detail="Orden médica no encontrada")
+        
+    # 3. Buscar todos los resultados vinculados a ese ID
+    lista_resultados = await ResultadoMuestra.find(ResultadoMuestra.orden_id == orden_id).to_list()
+    
+    # 4. Retornar el paquete consolidado
+    return {
+        "numero_orden": orden.numero_orden,
+        "paciente": orden.paciente,
+        "medico": orden.medico_solicitante,
+        "total_estudios_procesados": len(lista_resultados),
+        "detalle_resultados": lista_resultados
     }

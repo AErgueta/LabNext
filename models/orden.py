@@ -35,6 +35,7 @@ class Orden(Document):
     total_pagado: float = 0.0
     estado: str = "Ingresada" 
 
+    
     @before_event([Insert, Replace, Save])
     async def procesar_logica_laboratorio(self):
         """

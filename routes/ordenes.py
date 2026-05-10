@@ -11,6 +11,10 @@ from services.evaluador import interpretar_resultado # Importamos nuestra Funci�
 from utils.seguridad import verificar_token
 from models.muestra import Muestra
 from models.resultado import ResultadoMuestra
+from bson import ObjectId
+from datetime import datetime
+
+from schemas.ordenes import ConfiguracionTubo
 
 router = APIRouter()
 
@@ -163,3 +167,55 @@ async def obtener_expediente_completo(id: PydanticObjectId):
             } for r in resultados
         ]
     }
+
+@router.post("/ordenes/{orden_id}/generar_tubos")
+async def generar_tubos_para_orden(
+    orden_id: str, 
+    configuraciones: List[ConfiguracionTubo], # <--- Recibimos la elección del usuario
+    usuario_actual: dict = Depends(verificar_token)
+):
+    # 1. Buscamos la orden
+    orden = await Orden.get(orden_id)
+    if not orden:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+    # 2. Extraemos el usuario del token (nuestro arreglo de ayer)
+    identificador_usuario = usuario_actual.get("sub") or "Sistema"
+    fecha_corta = datetime.now().strftime("%y%m%d")
+    
+    tubos_generados = []
+    correlativo = 1
+
+    # 3. Iteramos sobre lo que el usuario configuró manualmente
+    for config in configuraciones:
+        # Generamos el código de barras (ej. 240520-396-1)
+        codigo_barras = f"{fecha_corta}-{orden.numero_orden[-3:]}-{correlativo}"
+        
+        # Creamos la instancia de Muestra (UNA POR CADA VUELTA)
+        nuevo_tubo = Muestra(
+            codigo_barras=codigo_barras,
+            orden_id=orden.id,
+            flujo_id=ObjectId(config.flujo_id), # <--- ¡DINÁMICO! Usamos lo que envió el usuario
+            tipo_muestra=config.tipo_muestra,
+            estado_actual="Recolectada",
+            historial_tracking=[
+                {
+                    "estado": "Recolectada",
+                    "fecha_hora": datetime.now(),
+                    "usuario": identificador_usuario,
+                    "sede_id": orden.sede_id,
+                    "observaciones": "Tubo generado con flujo elegido por el usuario."
+                }
+            ]
+        )
+        
+        await nuevo_tubo.insert()
+        tubos_generados.append(nuevo_tubo)
+        correlativo += 1
+
+    return {
+            "status": "success",
+            "message": f"Se generaron {len(tubos_generados)} tubos para impresión",
+            "paciente": orden.paciente.nombre_completo,
+            "tubos": tubos_generados
+        }
