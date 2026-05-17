@@ -4,7 +4,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Literal
 
 # 1. Definimos los roles oficiales del laboratorio
-RolUsuario = Literal["Admin", "Cajero", "TomadorMuestra", "Bioquimico"]
+RolUsuario = Literal["Admin", "Cajero", "TomadorMuestra", "Bioquimico", "BioquimicoValidador"]
 
 class Usuario(Document):
     username: str

@@ -35,6 +35,9 @@ class Orden(Document):
     total_pagado: float = 0.0
     estado: str = "Ingresada" 
 
+    bioquimico_validador: Optional[str] = None
+    fecha_validacion: Optional[datetime] = None
+
     
     @before_event([Insert, Replace, Save])
     async def procesar_logica_laboratorio(self):

@@ -1,5 +1,5 @@
 # Archivo: routes/ordenes.py
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import Response
 from weasyprint import HTML
 from jinja2 import Environment, FileSystemLoader
@@ -16,10 +16,12 @@ from models.muestra import Muestra
 from models.resultado import ResultadoMuestra
 from bson import ObjectId
 from datetime import datetime
+from models.usuario import Usuario
 
 from schemas.ordenes import ConfiguracionTubo
 
-router = APIRouter()
+# router = APIRouter()
+router = APIRouter(prefix="/ordenes", tags=["Órdenes"])
 
 # @router.post("/ordenes")
 # async def crear_orden(orden: Orden, usuario: dict = Depends(verificar_token)):
@@ -31,13 +33,13 @@ router = APIRouter()
 #         "total_calculado": orden.total_pagado # Veremos si el trigger funcionó
 #     }
 
-@router.get("/ordenes/")
+@router.get("/")
 async def listar_ordenes():
     return await Orden.find_all().to_list()
 
 # --- NUEVA RUTA PARA PROCESAR RESULTADOS ---
 
-@router.post("/ordenes/{numero_orden}/resultados/{clave_analito}")
+@router.post("/{numero_orden}/resultados/{clave_analito}")
 async def registrar_resultado(numero_orden: str, clave_analito: str, valor: float):
     # 1. Buscamos la orden del paciente en la base de datos
     orden = await Orden.find_one(Orden.numero_orden == numero_orden)
@@ -79,7 +81,7 @@ class OrdenCreate(BaseModel):
     convenio: Optional[str] = None
     descuento_manual: float = 0.0
 
-@router.post("/ordenes", response_model=dict)
+@router.post("/", response_model=dict)
 async def crear_nueva_orden(
     datos: OrdenCreate,
     usuario_actual: dict = Depends(verificar_token)
@@ -130,18 +132,18 @@ async def crear_nueva_orden(
     }
 
 
-@router.get("/{id}/expediente", response_model=dict)
-async def obtener_expediente_completo(id: PydanticObjectId):
+@router.get("/{orden_id}/expediente", response_model=dict)
+async def obtener_expediente_completo(orden_id: PydanticObjectId):
     # 1. Buscar la Orden
-    orden = await Orden.get(id)
+    orden = await Orden.get(orden_id)
     if not orden:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
     # 2. Buscar todos los tubos (Muestras) asociados a esta orden
-    muestras = await Muestra.find(Muestra.orden_id == id).to_list()
+    muestras = await Muestra.find(Muestra.orden_id == orden_id).to_list()
 
     # 3. Buscar todos los resultados clínicos validados para esta orden
-    resultados = await ResultadoMuestra.find(ResultadoMuestra.orden_id == id).to_list()
+    resultados = await ResultadoMuestra.find(ResultadoMuestra.orden_id == orden_id).to_list()
 
     # 4. Consolidar la respuesta final
     return {
@@ -171,7 +173,7 @@ async def obtener_expediente_completo(id: PydanticObjectId):
         ]
     }
 
-@router.post("/ordenes/{orden_id}/generar_tubos")
+@router.post("/{orden_id}/generar_tubos")
 async def generar_tubos_para_orden(
     orden_id: str, 
     configuraciones: List[ConfiguracionTubo], # <--- Recibimos la elección del usuario
@@ -262,3 +264,104 @@ async def generar_reporte_pdf(orden_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=Reporte_LabNext_{orden_db.numero_orden}.pdf"}
     )
+
+
+@router.post("/{orden_id}/validar")
+async def validar_resultados_orden(
+    orden_id: str, 
+    usuario_actual: dict = Depends(verificar_token)  # <-- Magia de FastAPI
+):
+    # 1. Extraemos el usuario y rol de forma segura desde el Token
+    username_token = usuario_actual.get("username")
+    rol_token = usuario_actual.get("rol")
+
+    # 2. Validamos el ID de la orden
+    try:
+        orden_oid = PydanticObjectId(orden_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de orden inválido.")
+
+    # 3. Buscar la Orden
+    orden_db = await Orden.get(orden_oid)
+    if not orden_db:
+        raise HTTPException(status_code=404, detail="Orden no encontrada.")
+
+    # 4. Control de flujo: Evitar re-validación
+    if getattr(orden_db, "estado", "") == "Validada":
+        raise HTTPException(status_code=400, detail="Esta orden ya fue validada y liberada anteriormente.")
+
+    # 5. Control de Accesos Jerárquico desde el Token
+    if rol_token != "BioquimicoValidador":
+        raise HTTPException(
+            status_code=403, 
+            detail="No tienes permisos de validación clínica. Rol requerido: BioquimicoValidador."
+        )
+
+    # 6. Para estampar el nombre completo, buscamos al usuario en la BD
+    validador = await Usuario.find_one(Usuario.username == username_token)
+    if not validador:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado en la base de datos.")
+
+    # 7. Estampar la firma clínica
+    orden_db.estado = "Validada"
+    orden_db.bioquimico_validador = validador.nombre_completo  # Guardamos el nombre real
+    orden_db.fecha_validacion = datetime.utcnow()
+
+    # 8. Persistir cambios
+    await orden_db.save()
+
+    return {
+        "status": "success",
+        "mensaje": "Resultados validados con firma electrónica segura.",
+        "orden": orden_db.numero_orden,
+        "nuevo_estado": orden_db.estado,
+        "validado_por": orden_db.bioquimico_validador
+    }
+
+@router.put("/{orden_id}/revertir-validacion", tags=["Validación Clínica"])
+async def revertir_validacion_orden(
+    orden_id: str, 
+    usuario_actual: dict = Depends(verificar_token)
+):
+    # 1. Extraemos el rol de forma segura desde el Token
+    rol_token = usuario_actual.get("rol")
+
+    # 2. Control de Accesos: Solo Validadores (o Administradores) pueden deshacer esto
+    if rol_token not in ["BioquimicoValidador", "Admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="No tienes permisos para revertir validaciones clínicas."
+        )
+
+    # 3. Validamos el ID de la orden
+    try:
+        orden_oid = PydanticObjectId(orden_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de orden inválido.")
+
+    # 4. Buscar la Orden
+    orden_db = await Orden.get(orden_oid)
+    if not orden_db:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Orden no encontrada.")
+
+    # 5. Reglas de Negocio: Solo se puede revertir si está actualmente Validada
+    if getattr(orden_db, "estado", "") != "Validada":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail=f"No se puede revertir. La orden está en estado: '{orden_db.estado}'."
+        )
+
+    # 6. RETROCEDER EL ESTADO Y LIMPIAR LA FIRMA
+    orden_db.estado = "Procesada"  # La devolvemos a la fase previa
+    orden_db.bioquimico_validador = None
+    orden_db.fecha_validacion = None
+
+    # 7. Persistir cambios
+    await orden_db.save()
+
+    return {
+        "status": "success",
+        "mensaje": "Validación revertida. La orden vuelve a estar disponible para modificaciones.",
+        "orden": orden_db.numero_orden,
+        "nuevo_estado": orden_db.estado
+    }
