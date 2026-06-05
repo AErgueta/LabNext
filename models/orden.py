@@ -18,6 +18,7 @@ class PacienteInfo(BaseModel):
     nombre_completo: str
     sexo: str 
     edad_anos: int
+    email: Optional[str] = None
 
 class Orden(Document):
     numero_orden: str

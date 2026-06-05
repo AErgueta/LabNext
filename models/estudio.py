@@ -17,16 +17,20 @@ class Analito(BaseModel):
     clave_interfaz: str
     unidad_medida: str
     tipo_resultado: str
+    # ESPACIO RESERVADO PARA CÓDIGO LOINC DEL ANALITO
+    codigo_loinc: Optional[str] = None 
     rangos: List[RangoReferencia]
 
 class Estudio(Document):
     codigo_cups: str
+    # ESPACIO RESERVADO PARA CÓDIGO LOINC DEL PANEL/ESTUDIO
+    codigo_loinc_panel: Optional[str] = None 
     nombre_estudio: str
     seccion: str
     muestra: str
     # Días de la semana que el laboratorio corre la prueba (Ej: ["Lunes", "Miercoles"])
     dias_procesamiento: List[str] 
-    # NUEVO CAMPO: Tiempo que tarda el estudio en estar listo (Ej: 2 días)
+    # Tiempo que tarda el estudio en estar listo (Ej: 2 días)
     dias_demora: int = 1
     
     analitos: List[Analito]

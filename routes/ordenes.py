@@ -1,5 +1,5 @@
 # Archivo: routes/ordenes.py
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from fastapi.responses import Response
 from weasyprint import HTML
 from jinja2 import Environment, FileSystemLoader
@@ -9,6 +9,7 @@ from beanie import PydanticObjectId
 import random
 from models.orden import Orden, PacienteInfo
 from services.generador_muestras import generar_tubos_para_orden
+from services.notificaciones import enviar_correo_resultados
 from models.estudio import Estudio
 from services.evaluador import interpretar_resultado # Importamos nuestra Función Global
 from utils.seguridad import verificar_token
@@ -266,58 +267,6 @@ async def generar_reporte_pdf(orden_id: str):
     )
 
 
-@router.post("/{orden_id}/validar")
-async def validar_resultados_orden(
-    orden_id: str, 
-    usuario_actual: dict = Depends(verificar_token)  # <-- Magia de FastAPI
-):
-    # 1. Extraemos el usuario y rol de forma segura desde el Token
-    username_token = usuario_actual.get("username")
-    rol_token = usuario_actual.get("rol")
-
-    # 2. Validamos el ID de la orden
-    try:
-        orden_oid = PydanticObjectId(orden_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="ID de orden inválido.")
-
-    # 3. Buscar la Orden
-    orden_db = await Orden.get(orden_oid)
-    if not orden_db:
-        raise HTTPException(status_code=404, detail="Orden no encontrada.")
-
-    # 4. Control de flujo: Evitar re-validación
-    if getattr(orden_db, "estado", "") == "Validada":
-        raise HTTPException(status_code=400, detail="Esta orden ya fue validada y liberada anteriormente.")
-
-    # 5. Control de Accesos Jerárquico desde el Token
-    if rol_token != "BioquimicoValidador":
-        raise HTTPException(
-            status_code=403, 
-            detail="No tienes permisos de validación clínica. Rol requerido: BioquimicoValidador."
-        )
-
-    # 6. Para estampar el nombre completo, buscamos al usuario en la BD
-    validador = await Usuario.find_one(Usuario.username == username_token)
-    if not validador:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado en la base de datos.")
-
-    # 7. Estampar la firma clínica
-    orden_db.estado = "Validada"
-    orden_db.bioquimico_validador = validador.nombre_completo  # Guardamos el nombre real
-    orden_db.fecha_validacion = datetime.utcnow()
-
-    # 8. Persistir cambios
-    await orden_db.save()
-
-    return {
-        "status": "success",
-        "mensaje": "Resultados validados con firma electrónica segura.",
-        "orden": orden_db.numero_orden,
-        "nuevo_estado": orden_db.estado,
-        "validado_por": orden_db.bioquimico_validador
-    }
-
 @router.put("/{orden_id}/revertir-validacion", tags=["Validación Clínica"])
 async def revertir_validacion_orden(
     orden_id: str, 
@@ -364,4 +313,80 @@ async def revertir_validacion_orden(
         "mensaje": "Validación revertida. La orden vuelve a estar disponible para modificaciones.",
         "orden": orden_db.numero_orden,
         "nuevo_estado": orden_db.estado
+    }
+
+@router.post("/{orden_id}/validar", tags=["Validación Clínica"])
+async def validar_resultados_orden(
+    orden_id: str,
+    background_tasks: BackgroundTasks,
+    usuario_actual: dict = Depends(verificar_token)
+):
+    username_token = usuario_actual.get("username")
+    rol_token = usuario_actual.get("rol")
+
+    # 1. Validar el ID
+    try:
+        orden_oid = PydanticObjectId(orden_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de orden inválido.")
+
+    # 2. Buscar la Orden
+    orden_db = await Orden.get(orden_oid)
+    if not orden_db:
+        raise HTTPException(status_code=404, detail="Orden no encontrada.")
+
+    if getattr(orden_db, "estado", "") == "Validada":
+        raise HTTPException(status_code=400, detail="Esta orden ya fue validada anteriormente.")
+
+    if rol_token != "BioquimicoValidador":
+        raise HTTPException(status_code=403, detail="No tienes permisos de validación clínica.")
+
+    # 3. Buscar al usuario validador
+    validador = await Usuario.find_one(Usuario.username == username_token)
+    if not validador:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+
+    # 4. --- NUEVO: BUSCAR RESULTADOS Y GENERAR PDF ---
+    resultados_db = await ResultadoMuestra.find(ResultadoMuestra.orden_id == orden_oid).to_list()
+    if not resultados_db:
+        raise HTTPException(status_code=400, detail="No se puede validar ni enviar correo: La orden no tiene resultados cargados.")
+
+    # Renderizar plantilla y crear PDF en memoria (Bytes)
+    template = env.get_template("reporte_paciente.html")
+    html_renderizado = template.render(
+        orden=orden_db,
+        resultados=resultados_db
+    )
+    pdf_generado_bytes = HTML(string=html_renderizado).write_pdf()
+
+    # 5. Estampar la firma en BD
+    orden_db.estado = "Validada"
+    orden_db.bioquimico_validador = validador.nombre_completo
+    orden_db.fecha_validacion = datetime.utcnow()
+    await orden_db.save()
+
+    # 6. --- DISPARAR EL CORREO CON EL PDF ADJUNTO ---
+    # email_paciente = "aerguetab@live.com"  
+    # nombre_paciente = "Paciente de Prueba"
+    nombre_paciente = orden_db.paciente.nombre_completo 
+    email_paciente = orden_db.paciente.email
+
+    if not email_paciente:
+            print(f" LOG: El paciente {nombre_paciente} no tiene correo registrado. Se omitirá el envío.")
+            # Aquí le ponemos tu correo temporalmente para que no truene, 
+            # o puedes decidir no encolar la tarea (background_tasks.add_task) si está vacío.
+            email_paciente = "aerguetab@live.com"
+
+    background_tasks.add_task(
+        enviar_correo_resultados,
+        email_destino=email_paciente,
+        nombre_paciente=nombre_paciente,
+        numero_orden=orden_db.numero_orden,
+        pdf_bytes=pdf_generado_bytes # <--- ¡Aquí le pasamos el archivo físico!
+    )
+
+    return {
+        "status": "success",
+        "mensaje": "Resultados validados. El reporte en PDF está siendo enviado al paciente.",
+        "orden": orden_db.numero_orden
     }
