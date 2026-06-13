@@ -91,8 +91,16 @@ async def crear_nueva_orden(
     if not datos.estudios_solicitados:
         raise HTTPException(status_code=400, detail="La orden debe tener al menos un estudio solicitado.")
 
+    # --- NUEVO ESCUDO DE SEGURIDAD ---
+    # 1.5. Validar que el paciente tenga un correo válido
+    if not datos.paciente.email:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"El paciente {datos.paciente.nombre_completo} no tiene un correo registrado. Actualice sus datos en recepción antes de crear la orden."
+        )
+    # ---------------------------------
+
     # 2. Generar el número de orden (Simulado temporalmente)
-    # En producción esto será un correlativo real (Ej: ORD-26042026-001)
     nro_orden_generado = f"ORD-{random.randint(10000, 99999)}"
 
     # 3. Ensamblar la Orden con los datos del frontend
@@ -106,15 +114,14 @@ async def crear_nueva_orden(
         descuento_manual=datos.descuento_manual
     )
 
-    # 4. GUARDAR EN BD (¡Aquí se detona tu @before_event automáticamente!)
-    # Se calculará el total_pagado y la fecha_entrega_estimada
+    # 4. GUARDAR EN BD 
     await nueva_orden.insert()
 
     # 5. EL DISPARO LOGÍSTICO: Generar los tubos físicos
     try:
         tubos_generados = await generar_tubos_para_orden(nueva_orden, usuario_actual["username"])
     except Exception as e:
-        # Si algo falla al generar los tubos, avisamos pero no borramos la orden
+        print(f"DEBUG ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Orden creada, pero falló la logística: {str(e)}")
 
    # 6. Devolvemos un resumen completo al frontend
@@ -126,12 +133,10 @@ async def crear_nueva_orden(
             {
                 "codigo": tubo.codigo_barras, 
                 "tipo": tubo.tipo_muestra, 
-                # Buscamos la observación dentro del primer evento del historial
                 "seccion": tubo.historial_tracking[0].observaciones if tubo.historial_tracking else "Sin sección"
             } for tubo in tubos_generados
         ]
     }
-
 
 @router.get("/{orden_id}/expediente", response_model=dict)
 async def obtener_expediente_completo(orden_id: PydanticObjectId):
@@ -175,7 +180,7 @@ async def obtener_expediente_completo(orden_id: PydanticObjectId):
     }
 
 @router.post("/{orden_id}/generar_tubos")
-async def generar_tubos_para_orden(
+async def endpoint_generar_tubos_manual(
     orden_id: str, 
     configuraciones: List[ConfiguracionTubo], # <--- Recibimos la elección del usuario
     usuario_actual: dict = Depends(verificar_token)

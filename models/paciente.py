@@ -14,7 +14,7 @@ class Paciente(Document):
     sexo: str  # "M" o "F"
     
     telefono: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: EmailStr
     
     tipo_paciente_default: str = "Particular" 
     convenio_predeterminado: Optional[Link[Convenio]] = None
