@@ -36,8 +36,49 @@ router = APIRouter(prefix="/ordenes", tags=["Órdenes"])
 
 @router.get("/")
 async def listar_ordenes():
-    return await Orden.find_all().to_list()
+    # 1. Traemos todas las órdenes de la BD
+    ordenes_db = await Orden.find_all().to_list()
+    ordenes_con_estudios = []
 
+    for orden in ordenes_db:
+        # 2. Convertimos el objeto Beanie a un diccionario de Python para poder modificarlo
+        orden_dict = orden.dict()
+        estudios_detallados = []
+
+        # 3. Recorremos los códigos/IDs que tenga esta orden
+        for ref in orden.estudios_solicitados:
+            estudio = None
+            
+            # --- LÓGICA DEFENSIVA DEL BACKEND ---
+            # Intento A: Buscar asumiendo que es el nuevo estándar (ID de Mongo)
+            try:
+                estudio = await Estudio.get(PydanticObjectId(ref))
+            except Exception:
+                pass
+            
+            # Intento B: Si falló, buscamos asumiendo que es una orden vieja (codigo_cups como "903825")
+            if not estudio:
+                estudio = await Estudio.find_one(Estudio.codigo_cups == str(ref))
+            
+            # 4. Traducimos lo que encontramos al formato visual
+            if estudio:
+                estudios_detallados.append({
+                    "_id": str(estudio.id),
+                    "codigo_cups": estudio.codigo_cups,
+                    "nombre": estudio.nombre_estudio
+                })
+            else:
+                # Si el estudio fue borrado del catálogo
+                estudios_detallados.append({
+                    "nombre": f"Estudio no encontrado en catálogo ({ref})"
+                })
+        
+        # 5. Inyectamos la lista rica en detalles reemplazando la lista de IDs puros
+        orden_dict["estudios_solicitados"] = estudios_detallados
+        ordenes_con_estudios.append(orden_dict)
+
+    # 6. Enviamos a React la orden con los nombres ya traducidos
+    return ordenes_con_estudios
 # --- NUEVA RUTA PARA PROCESAR RESULTADOS ---
 
 @router.post("/{numero_orden}/resultados/{clave_analito}")

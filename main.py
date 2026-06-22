@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from database.config import conectar_bd
 
@@ -18,6 +19,14 @@ from routes.resultados import router as resultados
 from utils.init_db import verificar_y_actualizar_flujos
 
 app = FastAPI(title="LabNext API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"], # Tu frontend React
+    allow_credentials=True,
+    allow_methods=["*"], # Permitir GET, POST, PUT, DELETE, etc.
+    allow_headers=["*"], # Permitir cualquier cabecera (incluyendo el token de auth)
+)
 
 # Centralizamos todo lo que debe ocurrir al arrancar el servidor aquí
 @app.on_event("startup")
