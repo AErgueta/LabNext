@@ -1,54 +1,120 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import os
+import bcrypt
 import uvicorn
-from database.config import conectar_bd
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, Form, status
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import RedirectResponse
+from beanie import init_beanie
+from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
 
-from routes.estudios import router as rutas_estudios
-from routes.ordenes import router as rutas_ordenes 
-from routes.medicos import router as rutas_medicos
-from routes.convenios import router as rutas_convenios
-from routes.caja import router as rutas_caja
-from routes.auth import router as rutas_auth
-from routes.pacientes import router as rutas_pacientes
-from routes.sedes import router as rutas_sedes
-from routes.flujos import router as rutas_flujos
-from routes.muestras import router as rutas_muestras
-from routes.resultados import router as resultados
+# Importar los routers
+from routes.pacientes import router as pacientes_router
 
-# Importamos la función de sembrado arriba con los demás imports
-from utils.init_db import verificar_y_actualizar_flujos
+# Importar los modelos
+from models.usuario import Usuario 
+from models.paciente import Paciente  # <-- Agregado para el módulo de Pacientes
 
-app = FastAPI(title="LabNext API")
+load_dotenv()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"], # Tu frontend React
-    allow_credentials=True,
-    allow_methods=["*"], # Permitir GET, POST, PUT, DELETE, etc.
-    allow_headers=["*"], # Permitir cualquier cabecera (incluyendo el token de auth)
-)
-
-# Centralizamos todo lo que debe ocurrir al arrancar el servidor aquí
-@app.on_event("startup")
-async def iniciar_servidor():
-    # 1. Conectar a MongoDB a través de Beanie
-    await conectar_bd()
+# --- MANEJO DE INICIO DE APLICACIÓN (LIFESPAN) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Todo lo que está antes del 'yield' se ejecuta al arrancar el servidor
+    client = AsyncIOMotorClient(os.getenv("MONGO_URL"))
+    db = client["LabNext"]
     
-    # 2. Ejecutar inmediatamente el blindaje y actualización de flujos logísticos
-    await verificar_y_actualizar_flujos()
+    # Inicializamos Beanie con TODOS los modelos
+    await init_beanie(database=db, document_models=[Usuario, Paciente])
+    print("✅ Base de datos conectada correctamente")
+    
+    yield  # Aquí la aplicación se queda corriendo esperando usuarios
+    
+    # Lo que pongas después del 'yield' se ejecuta al apagar el servidor
+    print("🛑 Servidor LabNext detenido.")
 
-# Inclusión de routers de tu API
-app.include_router(rutas_estudios, tags=["Catálogo de Estudios"])
-app.include_router(rutas_ordenes, tags=["Órdenes de Trabajo"]) 
-app.include_router(rutas_medicos, tags=["Catálogo de Médicos"])
-app.include_router(rutas_convenios, tags=["Catálogo de Convenios"])
-app.include_router(rutas_caja, tags=["Caja y Facturación"])
-app.include_router(rutas_auth, tags=["Seguridad"])
-app.include_router(rutas_pacientes, tags=["Pacientes"])
-app.include_router(rutas_sedes, prefix="/sedes", tags=["Sedes"])
-app.include_router(rutas_flujos, prefix="/flujos", tags=["Configuración - Flujos de Muestras"])
-app.include_router(rutas_muestras, prefix="/muestras", tags=["Logística y Tracking"])
-app.include_router(resultados, prefix="/resultados", tags=["Resultados"])
+# Se lo asignamos a la aplicación al crearla
+app = FastAPI(title="LabNext", lifespan=lifespan)
 
+# Configuración de archivos estáticos y plantillas
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+# --- RUTAS DE AUTENTICACIÓN CON JINJA2 ---
+
+@app.get("/login")
+async def mostrar_login(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={}
+    )
+
+@app.post("/login")
+async def procesar_login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...)
+):
+    usuario = await Usuario.find_one(Usuario.username == username)
+    
+    if not usuario:
+        return templates.TemplateResponse(
+            request=request, name="login.html", context={"error": "Usuario o contraseña incorrectos"}
+        )
+
+    password_bytes = password.encode('utf-8')
+    hash_bytes = usuario.password_hash.encode('utf-8')
+    
+    if not bcrypt.checkpw(password_bytes, hash_bytes):
+        return templates.TemplateResponse(
+            request=request, name="login.html", context={"error": "Usuario o contraseña incorrectos"}
+        )
+    
+    if not usuario.activo:
+        return templates.TemplateResponse(
+            request=request, name="login.html", context={"error": "El usuario se encuentra inactivo"}
+        )
+
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    response.set_cookie(key="session_user", value=usuario.username, httponly=True)
+    return response
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie("session_user")
+    return response
+
+# --- RUTA PRINCIPAL ---
+
+@app.get("/")
+async def inicio(request: Request):
+    session_user = request.cookies.get("session_user")
+    if not session_user:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    # Obtenemos el usuario de la BD
+    usuario_db = await Usuario.find_one(Usuario.username == session_user)
+    
+    nombre_mostrar = usuario_db.nombre_completo if (usuario_db and usuario_db.nombre_completo) else session_user
+    rol_usuario = usuario_db.rol if usuario_db else "Usuario"
+
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "usuario": nombre_mostrar,
+            "rol": rol_usuario,
+            "mensaje": f"¡Bienvenido {nombre_mostrar}! Sistema LabNext conectado con Jinja2."
+        }
+    )
+
+# --- REGISTRO DE MÓDULOS (ROUTERS) ---
+app.include_router(pacientes_router)
+
+# --- ARRANCADOR DEL SERVIDOR ---
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
