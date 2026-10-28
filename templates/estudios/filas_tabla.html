@@ -1,0 +1,27 @@
+{% for e in estudios %}
+<tr>
+    <td><span class="badge bg-secondary">{{ e.codigo_cups }}</span></td>
+    <td><strong>{{ e.nombre_estudio }}</strong></td>
+    <td>{{ e.seccion }}</td>
+    <td><span class="badge bg-light text-dark border">{{ e.muestra }}</span></td>
+    <td>
+        <span class="badge bg-info text-dark">
+            {{ e.analitos|length }} analito(s)
+        </span>
+    </td>
+    <td>{{ e.dias_demora }} día(s)</td>
+    <td class="fw-bold text-success">{{ e.precio_base }} Bs.</td>
+    <td>
+        <a href="/estudios/editar/{{ e.id }}" class="btn btn-sm btn-warning">
+            <i class="bi bi-pencil"></i>
+        </a>
+    </td>
+</tr>
+{% else %}
+<tr>
+    <td colspan="8" class="text-center py-4 text-muted">
+        <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+        No se encontraron estudios.
+    </td>
+</tr>
+{% endfor %}

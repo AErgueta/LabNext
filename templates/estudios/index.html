@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-journal-medical text-primary"></i> Catálogo de Estudios</h2>
+        {% if rol == 'Admin' %}
+        <a href="/estudios/nuevo" class="btn btn-primary">
+            <i class="bi bi-plus-circle-fill me-1"></i> Nuevo Estudio
+        </a>
+        {% endif %}
+    </div>
+
+    <!-- 1. BARRA DE BÚSQUEDA EN VIVO -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-12">
+                    <input type="text" id="input-busqueda" class="form-control" placeholder="Buscar por Código CUPS o Nombre del Estudio...">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i> {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    <!-- 2. TABLA DE ESTUDIOS -->
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Código CUPS</th>
+                            <th>Estudio / Panel</th>
+                            <th>Sección</th>
+                            <th>Muestra</th>
+                            <th>Analitos</th>
+                            <th>Demora</th>
+                            <th>Precio Base</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <!-- Aquí inyectamos las filas -->
+                    <tbody id="tabla-estudios">
+                        {% include 'estudios/filas_tabla.html' %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 3. SCRIPT PARA LIVE SEARCH -->
+<script>
+    document.getElementById('input-busqueda').addEventListener('input', function(e) {
+        const query = e.target.value;
+        fetch(`/estudios/buscar_live?q=${encodeURIComponent(query)}`)
+            .then(response => response.text())
+            .then(html => {
+                document.getElementById('tabla-estudios').innerHTML = html;
+            })
+            .catch(error => console.error("Error en búsqueda:", error));
+    });
+</script>
+{% endblock %}

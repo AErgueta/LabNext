@@ -12,10 +12,12 @@ from dotenv import load_dotenv
 
 # Importar los routers
 from routes.pacientes import router as pacientes_router
+from routes.estudios import router as estudios_router  # <-- Módulo de Estudios agregado
 
 # Importar los modelos
 from models.usuario import Usuario 
-from models.paciente import Paciente  # <-- Agregado para el módulo de Pacientes
+from models.paciente import Paciente
+from models.estudio import Estudio  # <-- Modelo de Estudios agregado
 
 load_dotenv()
 
@@ -27,7 +29,7 @@ async def lifespan(app: FastAPI):
     db = client["LabNext"]
     
     # Inicializamos Beanie con TODOS los modelos
-    await init_beanie(database=db, document_models=[Usuario, Paciente])
+    await init_beanie(database=db, document_models=[Usuario, Paciente, Estudio]) # <-- Estudio incluido en la lista
     print("✅ Base de datos conectada correctamente")
     
     yield  # Aquí la aplicación se queda corriendo esperando usuarios
@@ -114,6 +116,7 @@ async def inicio(request: Request):
 
 # --- REGISTRO DE MÓDULOS (ROUTERS) ---
 app.include_router(pacientes_router)
+app.include_router(estudios_router) # <-- Router de Estudios registrado
 
 # --- ARRANCADOR DEL SERVIDOR ---
 if __name__ == "__main__":

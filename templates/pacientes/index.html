@@ -9,21 +9,18 @@
         </button>
     </div>
 
-    <!-- Barra de búsqueda -->
+    <!-- 1. BARRA DE BÚSQUEDA EN VIVO (Sin <form>) -->
     <div class="card mb-4 shadow-sm">
         <div class="card-body">
-            <form action="/pacientes" method="GET" class="row g-2">
-                <div class="col-md-10">
-                    <input type="text" name="q" class="form-control" placeholder="Buscar por C.I., Nombres o Apellidos..." value="{{ busqueda }}">
+            <div class="row">
+                <div class="col-12">
+                    <input type="text" id="input-busqueda" class="form-control" placeholder="Buscar por C.I. o Nombre Completo...">
                 </div>
-                <div class="col-md-2 d-grid">
-                    <button type="submit" class="btn btn-outline-secondary"><i class="bi bi-search"></i> Buscar</button>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
 
-    <!-- Tabla de Pacientes -->
+    <!-- 2. TABLA DE PACIENTES -->
     <div class="card shadow-sm">
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -32,34 +29,16 @@
                         <tr>
                             <th>C.I.</th>
                             <th>Nombre Completo</th>
-                            <th>F. Nacimiento</th>
+                            <th>F. Nac. (Edad)</th>
                             <th>Género</th>
                             <th>Teléfono</th>
                             <th>Email</th>
+                            <th>Acciones</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {% for p in pacientes %}
-                        <!-- DESPUÉS -->
-                            <tr>
-                                <td><strong>{{ p.ci }}</strong></td>
-                                <!-- Cambiamos a nombre_completo -->
-                                <td>{{ p.nombre_completo }}</td>
-                                <!-- Formateamos la fecha para quitar el 00:00:00 -->
-                                <td>{{ p.fecha_nacimiento.strftime('%Y-%m-%d') }}</td>
-                                <!-- Cambiamos genero por sexo -->
-                                <td>{{ p.sexo }}</td>
-                                <td>{{ p.telefono if p.telefono else '-' }}</td>
-                                <td>{{ p.email if p.email else '-' }}</td>
-                            </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="6" class="text-center py-4 text-muted">
-                                <i class="bi bi-inbox fs-3 d-block mb-2"></i>
-                                No se encontraron pacientes registrados.
-                            </td>
-                        </tr>
-                        {% endfor %}
+                    <!-- Aquí inyectamos el nuevo archivo -->
+                    <tbody id="tabla-pacientes">
+                        {% include 'pacientes/filas_tabla.html' %}
                     </tbody>
                 </table>
             </div>
@@ -67,54 +46,46 @@
     </div>
 </div>
 
-<!-- Modal para Registrar Paciente -->
-<div class="modal fade" id="modalNuevoPaciente" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
+<!-- MODAL PARA REGISTRAR PACIENTE (Campos corregidos) -->
+<div class="modal fade" id="modalNuevoPaciente" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form action="/pacientes/crear" method="POST">
                 <div class="modal-header bg-primary text-white">
-                    <h5 class="modal-title" id="modalLabel"><i class="bi bi-person-plus"></i> Registrar Nuevo Paciente</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h5 class="modal-title"><i class="bi bi-person-plus"></i> Registrar Nuevo Paciente</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-md-4">
-                            <label for="ci" class="form-label fw-bold">C.I. / Documento *</label>
-                            <input type="text" class="form-control" id="ci" name="ci" required placeholder="Ej: 8492019">
+                            <label class="form-label fw-bold">C.I. / Documento *</label>
+                            <input type="text" class="form-control" name="ci" required>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-bold">Nombre Completo *</label>
+                            <input type="text" class="form-control" name="nombre_completo" required>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Fecha Nacimiento *</label>
+                            <input type="date" class="form-control" name="fecha_nacimiento" required>
                         </div>
                         <div class="col-md-4">
-                            <label for="nombres" class="form-label fw-bold">Nombres *</label>
-                            <input type="text" class="form-control" id="nombres" name="nombres" required>
-                        </div>
-                        <div class="col-md-4">
-                            <label for="apellidos" class="form-label fw-bold">Apellidos *</label>
-                            <input type="text" class="form-control" id="apellidos" name="apellidos" required>
-                        </div>
-
-                        <div class="col-md-4">
-                            <label for="fecha_nacimiento" class="form-label fw-bold">Fecha Nacimiento *</label>
-                            <input type="date" class="form-control" id="fecha_nacimiento" name="fecha_nacimiento" required>
-                        </div>
-                        <div class="col-md-4">
-                            <label for="genero" class="form-label fw-bold">Género *</label>
-                            <select class="form-select" id="genero" name="genero" required>
-                                <option value="Masculino">Masculino</option>
-                                <option value="Femenino">Femenino</option>
+                            <label class="form-label fw-bold">Género *</label>
+                            <select class="form-select" name="sexo" required>
+                                <option value="M">Masculino</option>
+                                <option value="F">Femenino</option>
                                 <option value="Otro">Otro</option>
                             </select>
                         </div>
                         <div class="col-md-4">
-                            <label for="telefono" class="form-label">Teléfono / Celular</label>
-                            <input type="text" class="form-control" id="telefono" name="telefono" placeholder="Ej: 71234567">
+                            <label class="form-label">Teléfono / Celular</label>
+                            <input type="text" class="form-control" name="telefono">
                         </div>
 
-                        <div class="col-md-6">
-                            <label for="email" class="form-label">Email</label>
-                            <input type="email" class="form-control" id="email" name="email">
-                        </div>
-                        <div class="col-md-6">
-                            <label for="direccion" class="form-label">Dirección</label>
-                            <input type="text" class="form-control" id="direccion" name="direccion">
+                        <div class="col-md-12">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="email">
                         </div>
                     </div>
                 </div>
@@ -126,4 +97,19 @@
         </div>
     </div>
 </div>
+
+<!-- 3. SCRIPT PARA LIVE SEARCH -->
+<script>
+    document.getElementById('input-busqueda').addEventListener('input', function(e) {
+        const query = e.target.value;
+        // Consulta al backend pasando el texto que escribes
+        fetch(`/pacientes/buscar_live?q=${encodeURIComponent(query)}`)
+            .then(response => response.text())
+            .then(html => {
+                // Reemplaza el interior del tbody con la respuesta
+                document.getElementById('tabla-pacientes').innerHTML = html;
+            })
+            .catch(error => console.error("Error en búsqueda:", error));
+    });
+</script>
 {% endblock %}

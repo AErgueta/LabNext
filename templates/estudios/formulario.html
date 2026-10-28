@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container py-4">
+    <h2 class="mb-4 text-primary">
+        <i class="bi bi-droplet-half"></i> 
+        {% if estudio %}Editar Estudio: {{ estudio.nombre_estudio }}{% else %}Nuevo Estudio{% endif %}
+    </h2>
+    
+    <form id="form-estudio" onsubmit="guardarEstudio(event)">
+        <!-- DATOS GENERALES -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark text-white fw-bold">Datos Generales</div>
+            <div class="card-body row g-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-bold">Código CUPS</label>
+                    <input type="text" class="form-control" id="codigo_cups" value="{{ estudio.codigo_cups if estudio else '' }}" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">Nombre del Estudio</label>
+                    <input type="text" class="form-control" id="nombre_estudio" value="{{ estudio.nombre_estudio if estudio else '' }}" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold">Precio Base (Bs.)</label>
+                    <input type="number" step="0.01" class="form-control" id="precio_base" value="{{ estudio.precio_base if estudio else '' }}" required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Sección</label>
+                    <select class="form-select" id="seccion">
+                        <option value="Química Clínica" {% if estudio and estudio.seccion == 'Química Clínica' %}selected{% endif %}>Química Clínica</option>
+                        <option value="Hematología" {% if estudio and estudio.seccion == 'Hematología' %}selected{% endif %}>Hematología</option>
+                        <option value="Inmunología" {% if estudio and estudio.seccion == 'Inmunología' %}selected{% endif %}>Inmunología</option>
+                        <option value="Microbiología" {% if estudio and estudio.seccion == 'Microbiología' %}selected{% endif %}>Microbiología</option>
+                        <option value="Uroanálisis" {% if estudio and estudio.seccion == 'Uroanálisis' %}selected{% endif %}>Uroanálisis</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Tipo de Muestra</label>
+                    <input type="text" class="form-control" id="muestra" value="{{ estudio.muestra if estudio else '' }}" placeholder="Ej: Suero, EDTA">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Días Demora</label>
+                    <input type="number" class="form-control" id="dias_demora" value="{{ estudio.dias_demora if estudio else 1 }}" min="0">
+                </div>
+                
+                <div class="col-12">
+                    <label class="form-label fw-bold">Días de Procesamiento</label>
+                    <div id="dias_procesamiento" class="d-flex flex-wrap gap-3">
+                        {% set dias_registrados = estudio.dias_procesamiento if estudio else ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"] %}
+                        {% for dia in ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"] %}
+                        <label><input type="checkbox" value="{{ dia }}" {% if dia in dias_registrados %}checked{% endif %}> {{ dia }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONTENEDOR DE ANALITOS -->
+        <h4 class="mb-3 text-secondary">Analitos del Estudio</h4>
+        <div id="contenedor-analitos"></div>
+
+        <button type="button" class="btn btn-outline-primary mb-4" onclick="agregarAnalito()">
+            <i class="bi bi-plus-circle"></i> Agregar Analito
+        </button>
+
+        <hr>
+        <div class="d-flex justify-content-end gap-2">
+            <a href="/estudios" class="btn btn-secondary">Cancelar</a>
+            <button type="submit" class="btn btn-success"><i class="bi bi-save"></i> Guardar Cambios</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    let analitoCount = 0;
+    // 1. Recibimos el JSON del backend
+    const estudioExistente = {% if estudio_json %}{{ estudio_json | safe }}{% else %}null{% endif %};
+
+    // 2. INYECTAR NUEVO ANALITO (Adaptado para recibir datos)
+    function agregarAnalito(data = null) {
+        const id = analitoCount++;
+        const nombre = data ? data.nombre : '';
+        const clave = data ? data.clave_interfaz : '';
+        const unidad = data ? data.unidad_medida : '';
+        const tipo = data ? data.tipo_resultado : 'Numerico';
+
+        const html = `
+            <div class="card shadow-sm mb-4 border-primary analito-item" id="analito-${id}">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <span class="fw-bold">Analito</span>
+                    <button type="button" class="btn btn-sm btn-danger" onclick="document.getElementById('analito-${id}').remove()">X</button>
+                </div>
+                <div class="card-body row g-3">
+                    <div class="col-md-3"><label class="form-label">Nombre</label><input type="text" class="form-control a-nombre" value="${nombre}" required></div>
+                    <div class="col-md-3"><label class="form-label">Clave LIS</label><input type="text" class="form-control a-clave" value="${clave}"></div>
+                    <div class="col-md-3"><label class="form-label">Unidad</label><input type="text" class="form-control a-unidad" value="${unidad}"></div>
+                    <div class="col-md-3">
+                        <label class="form-label">Tipo Resultado</label>
+                        <select class="form-select a-tipo">
+                            <option value="Numerico" ${tipo === 'Numerico' ? 'selected' : ''}>Numérico</option>
+                            <option value="Texto" ${tipo === 'Texto' ? 'selected' : ''}>Texto / Cualitativo</option>
+                        </select>
+                    </div>
+                    
+                    <div class="col-12 mt-3">
+                        <table class="table table-sm table-bordered mb-1">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Sexo</th><th>Edad Mín</th><th>Edad Máx</th><th>Und.</th><th>Val Mín</th><th>Val Máx</th><th>Texto Ref.</th><th></th>
+                                </tr>
+                            </thead>
+                            <tbody class="contenedor-rangos"></tbody>
+                        </table>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="agregarRango(this)">+ Agregar Rango</button>
+                    </div>
+                </div>
+            </div>`;
+
+        document.getElementById('contenedor-analitos').insertAdjacentHTML('beforeend', html);
+
+        // Si hay rangos precargados, los inyectamos adentro
+        if (data && data.rangos) {
+            const btnRango = document.querySelector(`#analito-${id} button[onclick="agregarRango(this)"]`);
+            data.rangos.forEach(r => agregarRango(btnRango, r));
+        }
+    }
+
+    // 3. INYECTAR NUEVO RANGO (Adaptado para recibir datos)
+    function agregarRango(btn, data = null) {
+        const tbody = btn.previousElementSibling.querySelector('.contenedor-rangos');
+        const sexo = data ? data.sexo : 'Ambos';
+        const emin = data ? data.edad_min : 0;
+        const emax = data ? data.edad_max : 120;
+        const uedad = data ? data.unidad_edad : 'Años';
+        const vmin = (data && data.valor_min !== null) ? data.valor_min : '';
+        const vmax = (data && data.valor_max !== null) ? data.valor_max : '';
+        const texto = data ? (data.texto_referencia || '') : '';
+
+        const html = `
+            <tr class="rango-item">
+                <td><select class="form-select form-select-sm r-sexo">
+                    <option value="Ambos" ${sexo === 'Ambos' ? 'selected' : ''}>Ambos</option>
+                    <option value="M" ${sexo === 'M' ? 'selected' : ''}>M</option>
+                    <option value="F" ${sexo === 'F' ? 'selected' : ''}>F</option>
+                </select></td>
+                <td><input type="number" class="form-control form-control-sm r-emin" value="${emin}"></td>
+                <td><input type="number" class="form-control form-control-sm r-emax" value="${emax}"></td>
+                <td><select class="form-select form-select-sm r-u-edad"><option value="Años" ${uedad === 'Años' ? 'selected' : ''}>Años</option><option value="Meses" ${uedad === 'Meses' ? 'selected' : ''}>Meses</option></select></td>
+                <td><input type="number" step="0.01" class="form-control form-control-sm r-vmin" value="${vmin}"></td>
+                <td><input type="number" step="0.01" class="form-control form-control-sm r-vmax" value="${vmax}"></td>
+                <td><input type="text" class="form-control form-control-sm r-texto" value="${texto}"></td>
+                <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">X</button></td>
+            </tr>`;
+        tbody.insertAdjacentHTML('beforeend', html);
+    }
+
+    // 4. PRECARGAR LOS ANALITOS AL ABRIR LA PÁGINA AUTOMÁTICAMENTE
+    if (estudioExistente && estudioExistente.analitos) {
+        estudioExistente.analitos.forEach(a => agregarAnalito(a));
+    }
+
+    // 5. GUARDAR O ACTUALIZAR VIA FETCH
+    async function guardarEstudio(e) {
+        e.preventDefault();
+        
+        const diasNodes = document.querySelectorAll('#dias_procesamiento input:checked');
+        const dias = Array.from(diasNodes).map(cb => cb.value);
+
+        const payload = {
+            codigo_cups: document.getElementById('codigo_cups').value,
+            nombre_estudio: document.getElementById('nombre_estudio').value,
+            seccion: document.getElementById('seccion').value,
+            muestra: document.getElementById('muestra').value,
+            dias_procesamiento: dias,
+            dias_demora: parseInt(document.getElementById('dias_demora').value) || 0,
+            precio_base: parseFloat(document.getElementById('precio_base').value) || 0,
+            analitos: []
+        };
+
+        document.querySelectorAll('.analito-item').forEach(analitoNode => {
+            const analito = {
+                nombre: analitoNode.querySelector('.a-nombre').value,
+                clave_interfaz: analitoNode.querySelector('.a-clave').value,
+                unidad_medida: analitoNode.querySelector('.a-unidad').value,
+                tipo_resultado: analitoNode.querySelector('.a-tipo').value,
+                rangos: []
+            };
+
+            analitoNode.querySelectorAll('.rango-item').forEach(rangoNode => {
+                const vmin = rangoNode.querySelector('.r-vmin').value;
+                const vmax = rangoNode.querySelector('.r-vmax').value;
+                analito.rangos.push({
+                    sexo: rangoNode.querySelector('.r-sexo').value,
+                    edad_min: parseInt(rangoNode.querySelector('.r-emin').value) || 0,
+                    edad_max: parseInt(rangoNode.querySelector('.r-emax').value) || 120,
+                    unidad_edad: rangoNode.querySelector('.r-u-edad').value,
+                    valor_min: vmin !== '' ? parseFloat(vmin) : null,
+                    valor_max: vmax !== '' ? parseFloat(vmax) : null,
+                    texto_referencia: rangoNode.querySelector('.r-texto').value || null
+                });
+            });
+            payload.analitos.push(analito);
+        });
+
+        // Determinamos si es edición (PUT) o uno nuevo (POST)
+        // Pydantic v2 exporta el ID como "id", por lo que validamos ambos casos
+        const estudioId = estudioExistente ? (estudioExistente.id || estudioExistente._id) : null;
+        const esEdicion = estudioId !== null;
+        const url = esEdicion ? `/estudios/api/actualizar/${estudioId}` : '/estudios/api/guardar';
+        const method = esEdicion ? 'PUT' : 'POST';
+
+        try {
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if (response.ok) {
+                alert(esEdicion ? 'Estudio actualizado correctamente' : 'Estudio creado correctamente');
+                window.location.href = '/estudios';
+            } else {
+                const errData = await response.json();
+                alert('Error al guardar: ' + JSON.stringify(errData.message));
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+</script>
+{% endblock %}

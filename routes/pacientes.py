@@ -7,6 +7,14 @@ from models.usuario import Usuario
 from datetime import datetime
 from typing import Optional
 
+# --- FUNCIÓN AUXILIAR PARA LA EDAD ---
+def calcular_edad(fecha_nacimiento):
+    if not fecha_nacimiento:
+        return 0
+    hoy = datetime.now()
+    # Calcula la diferencia de años y resta 1 si aún no ha cumplido años este año
+    return hoy.year - fecha_nacimiento.year - ((hoy.month, hoy.day) < (fecha_nacimiento.month, fecha_nacimiento.day))
+
 router = APIRouter(prefix="/pacientes", tags=["Pacientes"])
 templates = Jinja2Templates(directory="templates")
 
@@ -44,7 +52,39 @@ async def listar_pacientes(request: Request, q: Optional[str] = None, error: Opt
             "rol": usuario_db.rol,
             "pacientes": pacientes_list,
             "busqueda": q or "",
-            "error": error
+            "error": error,
+            "calcular_edad": calcular_edad
+        }
+    )
+
+
+# --- 1.5 BÚSQUEDA EN VIVO (LIVE SEARCH) ---
+@router.get("/buscar_live")
+async def buscar_pacientes_live(request: Request, q: str = ""):
+    usuario_db = await obtener_usuario_sesion(request)
+    if not usuario_db:
+        return ""  # Seguridad: si no hay sesión activa, no devuelve datos
+        
+    # Si hay texto (q), busca coincidencias ignorando mayúsculas/minúsculas
+    if q:
+        pacientes_list = await Paciente.find(
+            {"$or": [
+                {"ci": {"$regex": q, "$options": "i"}},
+                {"nombre_completo": {"$regex": q, "$options": "i"}}
+            ]}
+        ).to_list()
+    else:
+        # Si la barra está vacía, devuelve todos los pacientes
+        pacientes_list = await Paciente.find_all().to_list()
+
+    # Renderiza SOLO el archivo partial con las filas actualizadas
+    return templates.TemplateResponse(
+        request=request,
+        name="pacientes/filas_tabla.html",
+        context={
+            "pacientes": pacientes_list,
+            "rol": usuario_db.rol,
+            "calcular_edad": calcular_edad
         }
     )
 
@@ -86,4 +126,35 @@ async def registrar_paciente(
     )
     await nuevo_paciente.insert()
 
+    return RedirectResponse(url="/pacientes", status_code=status.HTTP_302_FOUND)
+
+
+# --- 4. EDITAR PACIENTE ---
+@router.post("/editar/{ci}")
+async def editar_paciente(
+    request: Request, 
+    ci: str,
+    nombre_completo: str = Form(...), 
+    fecha_nacimiento: str = Form(...),
+    sexo: str = Form(...), 
+    telefono: Optional[str] = Form(None), 
+    email: Optional[str] = Form(None)
+):
+    usuario_db = await obtener_usuario_sesion(request)
+    if not usuario_db:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    # Buscamos el paciente
+    paciente = await Paciente.find_one(Paciente.ci == ci)
+    if paciente:
+        # Actualizamos los datos
+        paciente.nombre_completo = nombre_completo.strip()
+        paciente.fecha_nacimiento = datetime.strptime(fecha_nacimiento, "%Y-%m-%d")
+        paciente.sexo = sexo
+        paciente.telefono = telefono.strip() if telefono else None
+        paciente.email = email.strip() if email else None
+        
+        # Guardamos en la base de datos
+        await paciente.save()
+        
     return RedirectResponse(url="/pacientes", status_code=status.HTTP_302_FOUND)

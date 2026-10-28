@@ -1,0 +1,75 @@
+{% for p in pacientes %}
+<tr>
+    <td><strong>{{ p.ci }}</strong></td>
+    <td>{{ p.nombre_completo }}</td>
+    <td>
+        {{ p.fecha_nacimiento.strftime('%Y-%m-%d') }} <br>
+        <small class="text-muted fw-bold">{{ calcular_edad(p.fecha_nacimiento) }} años</small>
+    </td>
+    <td>{{ p.sexo }}</td>
+    <td>{{ p.telefono if p.telefono else '-' }}</td>
+    <td>{{ p.email if p.email else '-' }}</td>
+    <td>
+        <!-- Botón Editar -->
+        <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#modalEditar{{ p.ci }}">
+            <i class="bi bi-pencil"></i>
+        </button>
+    </td>
+</tr>
+
+<!-- Modal para Editar Paciente (Único por CI) -->
+<div class="modal fade" id="modalEditar{{ p.ci }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <!-- La ruta recibe el CI del paciente a editar -->
+            <form action="/pacientes/editar/{{ p.ci }}" method="POST">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title"><i class="bi bi-pencil-square"></i> Editar Paciente: {{ p.ci }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-start">
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label fw-bold">Nombre Completo *</label>
+                            <input type="text" class="form-control" name="nombre_completo" value="{{ p.nombre_completo }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Fecha Nacimiento *</label>
+                            <input type="date" class="form-control" name="fecha_nacimiento" value="{{ p.fecha_nacimiento.strftime('%Y-%m-%d') }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Género *</label>
+                            <select class="form-select" name="sexo" required>
+                                <option value="M" {% if p.sexo == 'M' %}selected{% endif %}>Masculino</option>
+                                <option value="F" {% if p.sexo == 'F' %}selected{% endif %}>Femenino</option>
+                                <option value="Otro" {% if p.sexo == 'Otro' %}selected{% endif %}>Otro</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Teléfono</label>
+                            <input type="text" class="form-control" name="telefono" value="{{ p.telefono if p.telefono else '' }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="email" value="{{ p.email if p.email else '' }}">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-warning"><i class="bi bi-save me-1"></i> Actualizar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<tr>
+    <!-- Actualizamos a colspan="7" por la nueva columna -->
+    <td colspan="7" class="text-center py-4 text-muted">
+        <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+        No se encontraron pacientes registrados.
+    </td>
+</tr>
+{% endfor %}
